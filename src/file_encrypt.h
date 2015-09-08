@@ -73,15 +73,17 @@ public:
     if (!from) { goto __cleanup_to; }
     while (!feof(old_handle)) {
       const size_t sz = fread(from, 1, block_sz, old_handle);
-      if (ferror(old_handle)) { goto __cleanup_to; }
+      if (ferror(old_handle)) { goto __cleanup_from; }
       int encrypted_sz = RSA_public_encrypt(sz, from, to, public_key_, 
                                             RSA_PKCS1_PADDING);
-      if (-1 == encrypted_sz) { goto __cleanup_to; }
+      if (-1 == encrypted_sz) { goto __cleanup_from; }
       if (fwrite(to, 1, encrypted_sz, new_handle) != encrypted_sz) {
-        goto __cleanup_to;
+        goto __cleanup_from;
       }
     }
     ret = 0;
+  __cleanup_from:
+    free(from);
   __cleanup_to:
     free(to);
   __cleanup_new_handle:
