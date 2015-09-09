@@ -24,68 +24,50 @@
 
 #include <string>
 #include <cassert>
+#include <vector>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
+
+#include "data_encrypt.h"
 
 
 class FileEncrypt {
 public:
   FileEncrypt() {
-    public_key_ = private_key_ = NULL;
   }
 
 
   int LoadPublicKey(const std::string& fpath) {
-    FILE* handle = fopen(fpath.c_str(), "r");
-    do {
-      if (!handle) { break; }
-      public_key_ = PEM_read_RSA_PUBKEY(handle, NULL, NULL, NULL);
-    } while (false);
-    if (handle) { fclose(handle); }
-    return public_key_ == NULL;
+    return data_encrypt_.LoadPublicKey(fpath);
   }
 
 
   int LoadPrivateKey(const std::string& fpath) {
-    FILE* handle = fopen(fpath.c_str(), "r");
-    do {
-      if (!handle) { break; }
-      private_key_ = PEM_read_RSAPrivateKey(handle, NULL, NULL, NULL);
-    } while (false);
-    if (handle) { fclose(handle); }
-    return private_key_ == NULL;
+    return data_encrypt_.LoadPrivateKey(fpath);
   }
 
 
   int EncryptFile(const std::string& old_name, const std::string& new_name) {
-    unsigned char *to = NULL, *from = NULL;
     int ret = -1;
-    if (!public_key_) { return -1; }
+    const int rsa_sz = RSA_size(data_encrypt_.GetPublicKey());
+    std::vector<unsigned char> from(rsa_sz - 11), to(rsa_sz);
+    if (!data_encrypt_.GetPublicKey()) { return -1; }
     FILE* old_handle = fopen(old_name.c_str(), "rb");
     if (!old_handle) { return -1; }
     FILE* new_handle = fopen(new_name.c_str(), "wb");
     if (!new_handle) { goto __cleanup_old_handle; }
-    const int rsa_sz = RSA_size(public_key_);
-    to = (unsigned char*)malloc(rsa_sz);
-    if (!to) { goto __cleanup_new_handle; }
-    const int block_sz = rsa_sz - 11;
-    from = (unsigned char*)malloc(block_sz);
-    if (!from) { goto __cleanup_to; }
     while (!feof(old_handle)) {
-      const size_t sz = fread(from, 1, block_sz, old_handle);
-      if (ferror(old_handle)) { goto __cleanup_from; }
-      int encrypted_sz = RSA_public_encrypt(sz, from, to, public_key_, 
-                                            RSA_PKCS1_PADDING);
-      if (-1 == encrypted_sz) { goto __cleanup_from; }
-      if (fwrite(to, 1, encrypted_sz, new_handle) != encrypted_sz) {
-        goto __cleanup_from;
+      const size_t sz = fread(&from[0], 1, from.size(), old_handle);
+      if (ferror(old_handle)) { goto __cleanup_new_handle; }
+      if (sz == 0) { continue; }
+      int ret = data_encrypt_.EncryptData(&from[0], sz, &to[0], to.size());
+      assert(!ret);
+      if (ret) { goto __cleanup_new_handle; }
+      if (fwrite(&to[0], 1, rsa_sz, new_handle) != rsa_sz) {
+        goto __cleanup_new_handle;
       }
     }
     ret = 0;
-  __cleanup_from:
-    free(from);
-  __cleanup_to:
-    free(to);
   __cleanup_new_handle:
     fclose(new_handle);
   __cleanup_old_handle:
@@ -95,34 +77,26 @@ public:
 
 
   int DecryptFile(const std::string& old_name, const std::string& new_name) {
-    unsigned char *to = NULL, *from = NULL;
+    if (!data_encrypt_.GetPrivateKey()) { return -1; }
     int ret = -1;
-    if (!private_key_) { return -1; }
+    const int rsa_sz = RSA_size(data_encrypt_.GetPrivateKey());
+    std::vector<unsigned char> from(rsa_sz), to(rsa_sz - 11);
     FILE* old_handle = fopen(old_name.c_str(), "rb");
     if (!old_handle) { return -1; }
     FILE* new_handle = fopen(new_name.c_str(), "wb");
     if (!new_handle) { goto __cleanup_old_handle; }
-    const int rsa_sz = RSA_size(private_key_);
-    to = (unsigned char*)malloc(rsa_sz);
-    if (!to) { goto __cleanup_new_handle; }
-    const int block_sz = rsa_sz;
-    from = (unsigned char*)malloc(block_sz);
-    if (!from) { goto __cleanup_to; }
     while (!feof(old_handle)) {
-      const size_t sz = fread(from, 1, block_sz, old_handle);
-      if (ferror(old_handle)) { goto __cleanup_from; }
-      int decrypted_sz = RSA_private_decrypt(sz, from, to, private_key_,
-                                             RSA_PKCS1_PADDING);
-      if (-1 == decrypted_sz) { goto __cleanup_from; }
-      if (fwrite(to, 1, decrypted_sz, new_handle) != decrypted_sz) {
-        goto __cleanup_from;
+      const size_t sz = fread(&from[0], 1, from.size(), old_handle);
+      if (ferror(old_handle)) { goto __cleanup_new_handle; }
+      if (sz == 0) { continue; }
+      int decrypt_sz = data_encrypt_.DecryptData(&from[0], sz, &to[0], to.size());
+      std::cout << decrypt_sz << std::endl;
+      if (-1 == decrypt_sz) { goto __cleanup_new_handle; }
+      if (fwrite(&to[0], 1, decrypt_sz, new_handle) != decrypt_sz) {
+        goto __cleanup_new_handle;
       }
     }
     ret = 0;
-  __cleanup_from:
-    free(from);
-  __cleanup_to:
-    free(to);
   __cleanup_new_handle:
     fclose(new_handle);
   __cleanup_old_handle:
@@ -136,7 +110,7 @@ public:
   }
 
 private:
-  RSA* public_key_, *private_key_;
+  DataEncrypt data_encrypt_;
 };
 
 #endif // FILE_ENCRYPT_H

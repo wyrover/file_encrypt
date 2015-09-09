@@ -30,7 +30,7 @@ extern "C" {
 
 int main(int argc, const char* argv[]) {
   FileEncrypt encrypt;
-  int ret = encrypt.LoadPublicKey("public.pem");
+  int ret = encrypt.LoadPublicKey("public.key");
   assert(!ret);
   ret = encrypt.LoadPrivateKey("private.pem");
   assert(!ret);
